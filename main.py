@@ -90,3 +90,8 @@ async def root():
         "phase": "1 - In-Memory",
         "docs": "http://localhost:8000/docs"
     }
+if __name__ == "__main__":
+    import uvicorn
+    import os
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run("main:app", host="0.0.0.0", port=port)
