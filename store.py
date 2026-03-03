@@ -1,5 +1,6 @@
 import redis
 import threading
+import os
 from typing import Optional
 
 INCREMENT_SCRIPT = """
@@ -17,18 +18,18 @@ return new_val
 
 class RedisStore:
     def __init__(self):
-        self.client = redis.Redis(
-            host='localhost',
-            port=6379,
-            decode_responses=True
-        )
+        # Use environment Redis URL if available (Render),
+        # otherwise default to local Redis
+        redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379")
+        self.client = redis.from_url(redis_url, decode_responses=True)
+
         self._lock = threading.Lock()
         self.client.ping()
 
-        # load increment script
+        # Load increment Lua script
         self._increment_sha = self.client.script_load(INCREMENT_SCRIPT)
 
-        # load sliding window script
+        # Load sliding window Lua script
         with open("atomic_sliding_window.lua", "r") as f:
             self._sliding_sha = self.client.script_load(f.read())
 
@@ -79,7 +80,7 @@ class RedisStore:
         info = self.client.info('memory')
         return {
             "total_keys": self.client.dbsize(),
-            "used_memory": info['used_memory_human'],
+            "used_memory": info.get('used_memory_human', 'N/A'),
             "backend": "redis"
         }
 
@@ -105,4 +106,5 @@ class _RedisDataProxy:
         pipe.execute()
 
 
+# Global singleton
 store = RedisStore()
