@@ -111,9 +111,9 @@ def register(data: RegisterRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Email already registered")
 
     new_user = User(
-        email=data.email,
-        hashed_password=hash_password(data.password),
-        is_approved=False
+    email=data.email,
+    password_hash=hash_password(data.password),
+    is_approved=False
     )
 
     db.add(new_user)
@@ -127,7 +127,7 @@ def register(data: RegisterRequest, db: Session = Depends(get_db)):
 def login(data: LoginRequest, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == data.email).first()
 
-    if not user or not verify_password(data.password, user.hashed_password):
+    if not user or not verify_password(data.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     if not user.is_approved:
