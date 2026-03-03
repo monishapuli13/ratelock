@@ -1,5 +1,7 @@
 fastapi
 uvicorn
 redis
-requests
-pydantic
+sqlalchemy
+psycopg2-binary
+python-jose[cryptography]
+passlib[bcrypt]
