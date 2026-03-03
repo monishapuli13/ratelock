@@ -1,5 +1,8 @@
 import time
 from fastapi import FastAPI
+from database import engine
+from models import Base
+Base.metadata.create_all(bind=engine)
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
