@@ -1,7 +1,6 @@
 fastapi
 uvicorn
-redis
 sqlalchemy
 psycopg2-binary
-python-jose[cryptography]
 passlib[bcrypt]
+bcrypt==4.0.1
