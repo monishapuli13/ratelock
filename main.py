@@ -2,7 +2,7 @@ import os
 import time
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Depends, status
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
@@ -18,13 +18,16 @@ import token_bucket
 from store import store
 
 
-# Create tables
+# ==========================
+# App Setup
+# ==========================
+
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
     title="RateLock",
     description="Rate Limiter as a Service",
-    version="1.0.0"
+    version="2.0.0"
 )
 
 app.add_middleware(
@@ -34,18 +37,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ==========================
-# Environment Variables
-# ==========================
-
 ADMIN_EMAIL = os.getenv("ADMIN_EMAIL")
-
-# ==========================
-# Security
-# ==========================
 
 security = HTTPBearer()
 
+
+# ==========================
+# AUTH HELPERS
+# ==========================
 
 def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
@@ -61,6 +60,9 @@ def get_current_user(
     user = db.query(User).filter(User.email == email).first()
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
+
+    if not user.is_approved:
+        raise HTTPException(status_code=403, detail="Account not approved")
 
     return user
 
@@ -113,7 +115,6 @@ def register(user: RegisterRequest, db: Session = Depends(get_db)):
 
     hashed = hash_password(user.password)
 
-    # Admin bootstrap logic
     if ADMIN_EMAIL and user.email == ADMIN_EMAIL:
         role = "admin"
         is_approved = True
@@ -170,7 +171,11 @@ def list_users(admin: User = Depends(require_admin), db: Session = Depends(get_d
 
 
 @app.post("/admin/approve/{user_id}")
-def approve_user(user_id: int, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+def approve_user(
+    user_id: int,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db)
+):
     user = db.query(User).filter(User.id == user_id).first()
 
     if not user:
@@ -183,22 +188,31 @@ def approve_user(user_id: int, admin: User = Depends(require_admin), db: Session
 
 
 # ==========================
-# RATE LIMIT ENDPOINTS
+# PROTECTED RATE LIMIT ENDPOINTS
 # ==========================
 
 @app.post("/v1/check")
-async def check_rate_limit(req: CheckRequest):
-    key = f"{req.identifier}:{req.resource}"
+async def check_rate_limit(
+    req: CheckRequest,
+    user: User = Depends(get_current_user)
+):
+    key = f"user:{user.id}:{req.identifier}:{req.resource}"
 
     if req.algorithm == "fixed_window":
-        result = fixed_window.check(key=key, limit=req.limit,
-                                    window_seconds=req.window_seconds,
-                                    cost=req.cost)
+        result = fixed_window.check(
+            key=key,
+            limit=req.limit,
+            window_seconds=req.window_seconds,
+            cost=req.cost
+        )
 
     elif req.algorithm == "sliding_window":
-        result = sliding_window.check(key=key, limit=req.limit,
-                                      window_seconds=req.window_seconds,
-                                      cost=req.cost)
+        result = sliding_window.check(
+            key=key,
+            limit=req.limit,
+            window_seconds=req.window_seconds,
+            cost=req.cost
+        )
 
     elif req.algorithm == "token_bucket":
         capacity = req.capacity or req.limit
@@ -210,18 +224,26 @@ async def check_rate_limit(req: CheckRequest):
             refill_rate=refill_rate,
             cost=req.cost
         )
+
     else:
-        return {"error": f"Unknown algorithm: {req.algorithm}"}
+        raise HTTPException(status_code=400, detail="Unknown algorithm")
 
     return result
 
 
 @app.post("/v1/reset")
-async def reset_limit(req: ResetRequest):
-    key = f"{req.identifier}:{req.resource}"
+async def reset_limit(
+    req: ResetRequest,
+    user: User = Depends(get_current_user)
+):
+    key_prefix = f"user:{user.id}:{req.identifier}:{req.resource}"
     deleted = []
 
-    for prefix in [f"fw:{key}:", f"sw:{key}:", f"tb:{key}"]:
+    for prefix in [
+        f"fw:{key_prefix}:",
+        f"sw:{key_prefix}:",
+        f"tb:{key_prefix}:"
+    ]:
         keys = store.keys_with_prefix(prefix)
         for k in keys:
             store.delete(k)
@@ -231,8 +253,12 @@ async def reset_limit(req: ResetRequest):
 
 
 @app.get("/v1/inspect/{identifier}")
-async def inspect(identifier: str, resource: str = "*"):
-    key = f"{identifier}:{resource}"
+async def inspect(
+    identifier: str,
+    resource: str = "*",
+    user: User = Depends(get_current_user)
+):
+    key = f"user:{user.id}:{identifier}:{resource}"
 
     keys = (
         store.keys_with_prefix(f"fw:{key}") +
@@ -251,15 +277,21 @@ async def inspect(identifier: str, resource: str = "*"):
 
 
 @app.get("/v1/stats")
-async def stats():
-    return store.stats()
+async def stats(user: User = Depends(get_current_user)):
+    return {
+        "user_id": user.id,
+        "stats": store.stats()
+    }
 
+
+# ==========================
+# HEALTH
+# ==========================
 
 @app.get("/health")
 async def health():
     return {
         "status": "healthy",
-        "store": store.stats(),
         "timestamp": time.time()
     }
 
@@ -268,6 +300,6 @@ async def health():
 async def root():
     return {
         "service": "RateLock",
-        "version": "1.0.0",
+        "version": "2.0.0",
         "docs": "/docs"
     }
