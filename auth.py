@@ -3,6 +3,22 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from fastapi import HTTPException, status
 import os
+import secrets
+from passlib.context import CryptContext
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+
+def generate_api_key():
+    return "sk_live_" + secrets.token_hex(24)
+
+
+def hash_api_key(key: str):
+    return pwd_context.hash(key)
+
+
+def verify_api_key(key: str, hashed: str):
+    return pwd_context.verify(key, hashed)
 
 # Secret key (set in Render later)
 SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-change-this")

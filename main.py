@@ -1,7 +1,7 @@
 import os
 import time
 from typing import Optional
-
+from auth import generate_api_key, hash_api_key, verify_api_key
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -16,6 +16,24 @@ import fixed_window
 import slidingwindow as sliding_window
 import token_bucket
 from store import store
+from fastapi import Header
+
+
+def get_user_from_api_key(
+    x_api_key: str = Header(None),
+    db: Session = Depends(get_db)
+):
+
+    if not x_api_key:
+        raise HTTPException(status_code=401, detail="API key required")
+
+    users = db.query(User).filter(User.api_key_hash.isnot(None)).all()
+
+    for user in users:
+        if verify_api_key(x_api_key, user.api_key_hash):
+            return user
+
+    raise HTTPException(status_code=401, detail="Invalid API key")
 
 
 # ==========================
@@ -302,4 +320,17 @@ async def root():
         "service": "RateLock",
         "version": "2.0.0",
         "docs": "/docs"
+    }
+@app.post("/generate-api-key")
+def create_api_key(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+
+    raw_key = generate_api_key()
+    hashed_key = hash_api_key(raw_key)
+
+    user.api_key_hash = hashed_key
+    db.commit()
+
+    return {
+        "api_key": raw_key,
+        "message": "Store this key securely. It will not be shown again."
     }
