@@ -1,24 +1,37 @@
 import os
 import time
 from typing import Optional
-from auth import generate_api_key, hash_api_key, verify_api_key
-from fastapi import FastAPI, HTTPException, Depends
+
+from fastapi import FastAPI, HTTPException, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
+
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
-
 from database import engine, Base, get_db
 from models import User
-from auth import hash_password, verify_password, create_access_token, decode_token
+
+from auth import (
+    hash_password,
+    verify_password,
+    create_access_token,
+    decode_token,
+    generate_api_key,
+    hash_api_key,
+    verify_api_key
+)
 
 import fixed_window
 import slidingwindow as sliding_window
 import token_bucket
 from store import store
-from fastapi import Header
+
+
+# ==========================
+# Auto Schema Migration
+# ==========================
 
 def ensure_schema():
     with engine.connect() as conn:
@@ -27,24 +40,9 @@ def ensure_schema():
             ADD COLUMN IF NOT EXISTS api_key_hash TEXT;
         """))
         conn.commit()
+
+
 ensure_schema()
-
-def get_user_from_api_key(
-    x_api_key: str = Header(None),
-    db: Session = Depends(get_db)
-):
-
-    if not x_api_key:
-        raise HTTPException(status_code=401, detail="API key required")
-
-    users = db.query(User).filter(User.api_key_hash.isnot(None)).all()
-
-    for user in users:
-        if verify_api_key(x_api_key, user.api_key_hash):
-            return user
-
-    raise HTTPException(status_code=401, detail="Invalid API key")
-
 
 # ==========================
 # App Setup
@@ -66,7 +64,6 @@ app.add_middleware(
 )
 
 ADMIN_EMAIL = os.getenv("ADMIN_EMAIL")
-
 security = HTTPBearer()
 
 
@@ -78,14 +75,17 @@ def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db)
 ):
+
     token = credentials.credentials
     payload = decode_token(token)
 
     email = payload.get("sub")
+
     if not email:
         raise HTTPException(status_code=401, detail="Invalid token")
 
     user = db.query(User).filter(User.email == email).first()
+
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
 
@@ -99,6 +99,23 @@ def require_admin(user: User = Depends(get_current_user)):
     if user.role != "admin":
         raise HTTPException(status_code=403, detail="Admin access required")
     return user
+
+
+def get_user_from_api_key(
+    x_api_key: str = Header(None),
+    db: Session = Depends(get_db)
+):
+
+    if not x_api_key:
+        raise HTTPException(status_code=401, detail="API key required")
+
+    users = db.query(User).filter(User.api_key_hash.isnot(None)).all()
+
+    for user in users:
+        if verify_api_key(x_api_key, user.api_key_hash):
+            return user
+
+    raise HTTPException(status_code=401, detail="Invalid API key")
 
 
 # ==========================
@@ -137,7 +154,9 @@ class ResetRequest(BaseModel):
 
 @app.post("/register")
 def register(user: RegisterRequest, db: Session = Depends(get_db)):
+
     existing = db.query(User).filter(User.email == user.email).first()
+
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
 
@@ -168,6 +187,7 @@ def register(user: RegisterRequest, db: Session = Depends(get_db)):
 
 @app.post("/login")
 def login(user: LoginRequest, db: Session = Depends(get_db)):
+
     db_user = db.query(User).filter(User.email == user.email).first()
 
     if not db_user:
@@ -194,16 +214,12 @@ def login(user: LoginRequest, db: Session = Depends(get_db)):
 
 @app.get("/admin/users")
 def list_users(admin: User = Depends(require_admin), db: Session = Depends(get_db)):
-    users = db.query(User).all()
-    return users
+    return db.query(User).all()
 
 
 @app.post("/admin/approve/{user_id}")
-def approve_user(
-    user_id: int,
-    admin: User = Depends(require_admin),
-    db: Session = Depends(get_db)
-):
+def approve_user(user_id: int, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+
     user = db.query(User).filter(User.id == user_id).first()
 
     if not user:
@@ -216,17 +232,35 @@ def approve_user(
 
 
 # ==========================
-# PROTECTED RATE LIMIT ENDPOINTS
+# API KEY
+# ==========================
+
+@app.post("/generate-api-key")
+def create_api_key(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+
+    raw_key = generate_api_key()
+    hashed = hash_api_key(raw_key)
+
+    user.api_key_hash = hashed
+    db.commit()
+
+    return {
+        "api_key": raw_key,
+        "message": "Store this securely. It will not be shown again."
+    }
+
+
+# ==========================
+# RATE LIMIT ENDPOINTS
 # ==========================
 
 @app.post("/v1/check")
-async def check_rate_limit(
-    req: CheckRequest,
-    user: User = Depends(get_user_from_api_key)
-):
+async def check_rate_limit(req: CheckRequest, user: User = Depends(get_user_from_api_key)):
+
     key = f"user:{user.id}:{req.identifier}:{req.resource}"
 
     if req.algorithm == "fixed_window":
+
         result = fixed_window.check(
             key=key,
             limit=req.limit,
@@ -235,6 +269,7 @@ async def check_rate_limit(
         )
 
     elif req.algorithm == "sliding_window":
+
         result = sliding_window.check(
             key=key,
             limit=req.limit,
@@ -243,6 +278,7 @@ async def check_rate_limit(
         )
 
     elif req.algorithm == "token_bucket":
+
         capacity = req.capacity or req.limit
         refill_rate = req.refill_rate or (req.limit / req.window_seconds)
 
@@ -259,61 +295,8 @@ async def check_rate_limit(
     return result
 
 
-@app.post("/v1/reset")
-async def reset_limit(
-    req: ResetRequest,
-    user: User = Depends(get_current_user)
-):
-    key_prefix = f"user:{user.id}:{req.identifier}:{req.resource}"
-    deleted = []
-
-    for prefix in [
-        f"fw:{key_prefix}:",
-        f"sw:{key_prefix}:",
-        f"tb:{key_prefix}:"
-    ]:
-        keys = store.keys_with_prefix(prefix)
-        for k in keys:
-            store.delete(k)
-            deleted.append(k)
-
-    return {"reset": True, "keys_cleared": len(deleted)}
-
-
-@app.get("/v1/inspect/{identifier}")
-async def inspect(
-    identifier: str,
-    resource: str = "*",
-    user: User = Depends(get_current_user)
-):
-    key = f"user:{user.id}:{identifier}:{resource}"
-
-    keys = (
-        store.keys_with_prefix(f"fw:{key}") +
-        store.keys_with_prefix(f"sw:{key}") +
-        store.keys_with_prefix(f"tb:{key}")
-    )
-
-    state = {k: store.get(k) for k in keys if store.get(k)}
-
-    return {
-        "identifier": identifier,
-        "resource": resource,
-        "state": state,
-        "timestamp": time.time()
-    }
-
-
-@app.get("/v1/stats")
-async def stats(user: User = Depends(get_current_user)):
-    return {
-        "user_id": user.id,
-        "stats": store.stats()
-    }
-
-
 # ==========================
-# HEALTH
+# UTIL ENDPOINTS
 # ==========================
 
 @app.get("/health")
@@ -330,17 +313,4 @@ async def root():
         "service": "RateLock",
         "version": "2.0.0",
         "docs": "/docs"
-    }
-@app.post("/generate-api-key")
-def create_api_key(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-
-    raw_key = generate_api_key()
-    hashed_key = hash_api_key(raw_key)
-
-    user.api_key_hash = hashed_key
-    db.commit()
-
-    return {
-        "api_key": raw_key,
-        "message": "Store this key securely. It will not be shown again."
     }
