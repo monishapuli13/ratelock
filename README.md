@@ -40,3 +40,9 @@ It calls RateLock before validating login credentials and blocks brute-force att
 (ensure Redis is running on localhost:6379)
 
 ### 2. Install dependencies
+
+Live API:
+https://ratelock.onrender.com/docs
+
+Live Demo:
+https://ratelock-seven.vercel.app/
