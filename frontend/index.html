@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RateLock</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=DM+Mono:wght@300;400;500&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+
+<style>
+:root {
+  --bg:           #07090f;
+  --bg-2:         #0c1018;
+  --surface:      rgba(255,255,255,0.045);
+  --surface-hi:   rgba(255,255,255,0.075);
+  --border:       rgba(255,255,255,0.08);
+  --border-hi:    rgba(251,191,36,0.4);
+
+  --accent:       #fbbf24;
+  --accent-dim:   rgba(251,191,36,0.15);
+  --accent-glow:  rgba(251,191,36,0.2);
+
+  --blue-orb:     #1d4ed8;
+  --purple-orb:   #6d28d9;
+
+  --text-1:       #e4e9f5;
+  --text-2:       #7a859e;
+  --text-3:       #3a4358;
+
+  --mono:         'DM Mono', monospace;
+  --sans:         'DM Sans', sans-serif;
+  --display:      'Cormorant Garamond', serif;
+
+  --r-sm:         6px;
+  --r-md:         12px;
+  --r-lg:         18px;
+  --ease:         cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--text-1);
+  font-family: var(--sans);
+  font-weight: 300;
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 64px 20px;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+/* ── Ambient Orbs ── */
+.bg-blur {
+  position: fixed;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 0;
+}
+.bg-blur.one {
+  width: 500px; height: 500px;
+  background: radial-gradient(circle, var(--blue-orb), transparent 65%);
+  filter: blur(90px);
+  opacity: 0.18;
+  top: -80px; left: -100px;
+}
+.bg-blur.two {
+  width: 400px; height: 400px;
+  background: radial-gradient(circle, var(--purple-orb), transparent 65%);
+  filter: blur(80px);
+  opacity: 0.14;
+  bottom: 0; right: -80px;
+}
+
+/* ── Container ── */
+.container {
+  width: min(820px, 100%);
+  position: relative;
+  z-index: 1;
+  animation: fadeUp 0.6s var(--ease) both;
+}
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(18px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Header ── */
+.header {
+  margin-bottom: 40px;
+  padding-bottom: 28px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+.header-left { display: flex; flex-direction: column; gap: 6px; }
+
+.wordmark {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.logo-mark {
+  width: 36px; height: 36px;
+  border: 1.5px solid var(--accent);
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  position: relative;
+  flex-shrink: 0;
+}
+.logo-mark::before {
+  content: '';
+  width: 12px; height: 12px;
+  background: var(--accent);
+  border-radius: 2px;
+  opacity: 0.9;
+}
+.logo-mark::after {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  border: 1px solid rgba(251,191,36,0.25);
+  border-radius: 5px;
+}
+
+h1 {
+  font-family: var(--display);
+  font-size: 38px;
+  font-weight: 500;
+  letter-spacing: -0.3px;
+  color: var(--text-1);
+  line-height: 1;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--accent);
+  background: var(--accent-dim);
+  border: 1px solid rgba(251,191,36,0.2);
+  padding: 3px 9px;
+  border-radius: 20px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.badge::before {
+  content: '';
+  width: 5px; height: 5px;
+  background: var(--accent);
+  border-radius: 50%;
+  box-shadow: 0 0 6px var(--accent);
+  animation: pulse 2s infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+
+.subtitle {
+  font-size: 13px;
+  color: var(--text-2);
+  font-weight: 300;
+  letter-spacing: 0.01em;
+}
+
+.version-tag {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-3);
+  align-self: flex-end;
+}
+
+/* ── Card ── */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: 32px;
+  margin-bottom: 20px;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: 0 1px 0 rgba(255,255,255,0.04) inset, 0 20px 50px rgba(0,0,0,0.4);
+  animation: fadeUp 0.6s var(--ease) 0.1s both;
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+h2 {
+  font-family: var(--display);
+  font-size: 22px;
+  font-weight: 500;
+  color: var(--text-1);
+  letter-spacing: 0.01em;
+}
+
+.card-tag {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-3);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+/* ── Form Grid ── */
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.form-grid .full { grid-column: 1 / -1; }
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+label {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-3);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+input, select {
+  width: 100%;
+  padding: 11px 14px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text-1);
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 300;
+  outline: none;
+  transition: border-color 0.2s var(--ease), background 0.2s var(--ease), box-shadow 0.2s var(--ease);
+  -webkit-appearance: none;
+}
+
+input:focus, select:focus {
+  border-color: var(--border-hi);
+  background: rgba(251,191,36,0.04);
+  box-shadow: 0 0 0 3px rgba(251,191,36,0.08);
+}
+
+input::placeholder { color: var(--text-3); }
+
+select {
+  cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%233a4358' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 32px;
+}
+
+select option { background: #0c1018; color: var(--text-1); }
+
+/* ── Button ── */
+button {
+  width: 100%;
+  padding: 13px;
+  margin-top: 4px;
+  background: var(--accent-dim);
+  border: 1px solid rgba(251,191,36,0.3);
+  border-radius: var(--r-sm);
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 0.2s var(--ease);
+  position: relative;
+  overflow: hidden;
+}
+
+button::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to bottom, rgba(251,191,36,0.06), transparent);
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+button:hover {
+  background: rgba(251,191,36,0.2);
+  border-color: rgba(251,191,36,0.55);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px var(--accent-glow);
+}
+button:hover::after { opacity: 1; }
+button:active { transform: translateY(0); }
+
+/* ── Result Panel ── */
+.result-wrapper {
+  margin-top: 14px;
+  position: relative;
+}
+
+.result-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-3);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+
+pre {
+  background: rgba(0,0,0,0.5);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 16px 18px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--text-2);
+  min-height: 52px;
+  overflow-x: auto;
+  position: relative;
+}
+
+pre::before {
+  content: '●  ●  ●';
+  display: block;
+  font-size: 8px;
+  color: var(--text-3);
+  letter-spacing: 3px;
+  margin-bottom: 10px;
+}
+
+/* ── Info Cards ── */
+.info {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+  animation: fadeUp 0.6s var(--ease) 0.2s both;
+}
+
+.info-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 22px 20px;
+  transition: all 0.25s var(--ease);
+  position: relative;
+  overflow: hidden;
+}
+
+.info-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--accent), transparent);
+  opacity: 0;
+  transition: opacity 0.25s;
+}
+
+.info-card:hover {
+  border-color: rgba(255,255,255,0.14);
+  transform: translateY(-3px);
+  box-shadow: 0 10px 28px rgba(0,0,0,0.35);
+}
+
+.info-card:hover::before { opacity: 1; }
+
+.info-card-index {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--accent);
+  opacity: 0.6;
+  letter-spacing: 0.08em;
+  margin-bottom: 10px;
+  display: block;
+}
+
+h3 {
+  font-family: var(--display);
+  font-size: 17px;
+  font-weight: 500;
+  color: var(--text-1);
+  margin-bottom: 6px;
+}
+
+.info-card p {
+  font-size: 13px;
+  color: var(--text-2);
+  line-height: 1.6;
+  font-weight: 300;
+}
+
+/* ── Responsive ── */
+@media (max-width: 600px) {
+  .form-grid { grid-template-columns: 1fr; }
+  .info { grid-template-columns: 1fr; }
+  .header { flex-direction: column; align-items: flex-start; }
+  h1 { font-size: 30px; }
+}
+</style>
+</head>
+
+<body>
+
+<div class="bg-blur one"></div>
+<div class="bg-blur two"></div>
+
+<div class="container">
+
+  <header class="header">
+    <div class="header-left">
+      <div class="wordmark">
+        <div class="logo-mark"></div>
+        <h1>RateLock</h1>
+      </div>
+      <p class="subtitle">Production-ready Rate Limiting Service</p>
+    </div>
+    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px">
+      <span class="badge">Live</span>
+      <span class="version-tag">v2.4.1</span>
+    </div>
+  </header>
+
+  <div class="card">
+    <div class="card-header">
+      <h2>Test the Rate Limiter</h2>
+      <span class="card-tag">POST /api/check</span>
+    </div>
+
+    <div class="form-grid">
+      <div class="field">
+        <label for="identifier">Identifier</label>
+        <input id="identifier" placeholder="user:123 or ip:x.x.x.x">
+      </div>
+      <div class="field">
+        <label for="algorithm">Algorithm</label>
+        <select id="algorithm">
+          <option value="sliding_window">Sliding Window</option>
+          <option value="fixed_window">Fixed Window</option>
+          <option value="token_bucket">Token Bucket</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="limit">Limit</label>
+        <input id="limit" type="number" placeholder="100">
+      </div>
+      <div class="field">
+        <label for="window">Window (seconds)</label>
+        <input id="window" type="number" placeholder="60">
+      </div>
+      <div class="field full">
+        <label for="apikey">API Key</label>
+        <input id="apikey" placeholder="rl_live_••••••••••••••••">
+      </div>
+    </div>
+
+    <button onclick="sendRequest()">↳ Check Rate Limit</button>
+
+    <div class="result-wrapper">
+      <div class="result-label">Response</div>
+      <pre id="result">Awaiting request...</pre>
+    </div>
+  </div>
+
+  <div class="info">
+    <div class="info-card">
+      <span class="info-card-index">01 — sliding</span>
+      <h3>Sliding Window</h3>
+      <p>Smooth rate limiting using weighted counters across time boundaries.</p>
+    </div>
+    <div class="info-card">
+      <span class="info-card-index">02 — bucket</span>
+      <h3>Token Bucket</h3>
+      <p>Supports burst traffic with continuous token refill mechanics.</p>
+    </div>
+    <div class="info-card">
+      <span class="info-card-index">03 — fixed</span>
+      <h3>Fixed Window</h3>
+      <p>Simple counter reset at the boundary of each time window.</p>
+    </div>
+  </div>
+
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
