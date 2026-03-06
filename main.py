@@ -8,6 +8,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+
 from database import engine, Base, get_db
 from models import User
 from auth import hash_password, verify_password, create_access_token, decode_token
@@ -18,6 +19,14 @@ import token_bucket
 from store import store
 from fastapi import Header
 
+def ensure_schema():
+    with engine.connect() as conn:
+        conn.execute(text("""
+            ALTER TABLE users
+            ADD COLUMN IF NOT EXISTS api_key_hash TEXT;
+        """))
+        conn.commit()
+ensure_schema()
 
 def get_user_from_api_key(
     x_api_key: str = Header(None),
@@ -212,7 +221,7 @@ def approve_user(
 @app.post("/v1/check")
 async def check_rate_limit(
     req: CheckRequest,
-    user: User = Depends(get_current_user)
+    user: User = Depends(get_user_from_api_key)
 ):
     key = f"user:{user.id}:{req.identifier}:{req.resource}"
 
